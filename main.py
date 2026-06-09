@@ -12,20 +12,11 @@ CHANNELS = ["@methadchannnel", "@otpgroupbabai"]
 ADMIN_USERNAME = "babaiigc900179"
 TARGET_GROUP_ID = "-1002242139049" 
 
-# --- COUNTRY MAPPING ---
-COUNTRY_MAP = {
-    "225": "IVORY COAST",
-    "92": "PAKISTAN",
-    "91": "INDIA",
-    "880": "BANGLADESH",
-    "27": "SOUTH AFRICA"
-}
-
 user_status = {}
 verified_users = set()
 
 # --- UI & LOGIC HELPERS ---
-def get_simple_ui(number, otp=None, country="UNKNOWN"):
+def get_simple_ui(number, otp=None, country="GLOBAL"):
     status = f"🔢 OTP: `{otp}`" if otp else "⏳ Waiting for OTP..."
     return (
         f"🌐 *{country}*\n\n"
@@ -34,12 +25,6 @@ def get_simple_ui(number, otp=None, country="UNKNOWN"):
         "┗━━━━━━━━━━━━━━━━┛\n\n"
         f"{status}"
     )
-
-def detect_country(range_text):
-    for prefix, name in COUNTRY_MAP.items():
-        if range_text.startswith(prefix):
-            return name
-    return "GLOBAL"
 
 async def is_subscribed(context, user_id):
     for channel in CHANNELS:
@@ -100,32 +85,37 @@ async def poll_otp(context, chat_id, message_id, number_id, number, country):
         except: pass
         await asyncio.sleep(5)
 
+# --- GLOBAL SEARCH UPDATED HANDLER ---
 async def text_handler(update, context):
     chat_id = update.message.chat_id
     if user_status.get(chat_id) == "waiting_for_range":
-        target_range = update.message.text.replace("XXX", "").strip()
-        country_name = detect_country(target_range)
+        target_range = update.message.text.strip()
         user_status[chat_id] = None
-        msg = await update.message.reply_text("🔍 *Searching...*", parse_mode='Markdown')
+        msg = await update.message.reply_text("🔍 *Searching Global Database...*", parse_mode='Markdown')
         
         found = False
-        for _ in range(15):
+        for _ in range(20): 
             try:
-                resp = requests.post(f"{BASE_URL}/numbers/get", json={"service": "google", "country": "BD", "engine": 1}, headers=HEADERS).json()
+                # API ko 'country' batane ki zaroorat nahi, global search karega
+                resp = requests.post(f"{BASE_URL}/numbers/get", json={"service": "google", "engine": 1}, headers=HEADERS).json()
+                
                 if resp.get("success") and resp.get("number", "").startswith(target_range):
-                    await msg.edit_text(get_simple_ui(resp['number'], country=country_name), parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅ Back to Menu", callback_data='back_to_main')]]))
-                    asyncio.create_task(poll_otp(context, chat_id, msg.message_id, resp['number_id'], resp['number'], country_name))
+                    num = resp['number']
+                    await msg.edit_text(get_simple_ui(num, country="GLOBAL"), parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅ Back", callback_data='back_to_main')]]))
+                    asyncio.create_task(poll_otp(context, chat_id, msg.message_id, resp['number_id'], num, "GLOBAL"))
                     found = True
                     break
             except: pass
             await asyncio.sleep(2)
-        if not found: await msg.edit_text("❌ No match found.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅ Back to Menu", callback_data='back_to_main')]]))
+        
+        if not found: 
+            await msg.edit_text("❌ No match found. Try another range.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅ Back", callback_data='back_to_main')]]))
 
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-    print("Bot is ready and fully integrated!")
+    print("Bot is ready!")
     app.run_polling()
-                                          
+            
