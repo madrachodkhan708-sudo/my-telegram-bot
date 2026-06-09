@@ -1,111 +1,131 @@
+import requests
+import asyncio
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes
+from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
-# Yahan apna token aur username confirm kar lein
-TOKEN = '8852095458:AAGErCCIZe4Iol1Gf8Izb5Z8BrNN_Cc6jdk'
+# --- CONFIGURATION ---
+TOKEN = '8822336512:AAGckx_QRYKCeNoxVctg6rkEojDO_lDJgtg'
+API_KEY = "nxa_a5981d47fcecb4f89a16bc469d61c503c02d9180" 
+BASE_URL = "http://63.141.255.227/api/v1"
+HEADERS = {"X-API-Key": API_KEY}
+CHANNELS = ["@methadchannnel", "@otpgroupbabai"]
 ADMIN_USERNAME = "babaiigc900179"
-UPI_ID = "Binay956@ptyes" 
+TARGET_GROUP_ID = "-1002242139049" 
 
-# Global Variable
-user_balance = 0
+# --- COUNTRY MAPPING ---
+COUNTRY_MAP = {
+    "225": "IVORY COAST",
+    "92": "PAKISTAN",
+    "91": "INDIA",
+    "880": "BANGLADESH",
+    "27": "SOUTH AFRICA"
+}
 
-def get_main_menu():
-    return [
-        [InlineKeyboardButton("📱 Get Number", callback_data='get_number'),
-         InlineKeyboardButton("💰 Deposit", callback_data='deposit')],
-        [InlineKeyboardButton(f"💳 Balance: {user_balance} INR", callback_data='balance'),
-         InlineKeyboardButton("📞 Support", callback_data='support')]
-    ]
+user_status = {}
+verified_users = set()
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Naya user notification logic
-    user = update.effective_user
-    admin_msg = (f"👤 *Naya User Aaya!*\n\nName: {user.first_name}\n"
-                 f"ID: `{user.id}`\nUsername: @{user.username if user.username else 'N/A'}")
-    
-    # Notification admin ko bhejna (Agar admin ne bot start kiya hai)
-    try:
-        await context.bot.send_message(chat_id=ADMIN_USERNAME, text=admin_msg, parse_mode='Markdown')
-    except:
-        pass 
+# --- UI & LOGIC HELPERS ---
+def get_simple_ui(number, otp=None, country="UNKNOWN"):
+    status = f"🔢 OTP: `{otp}`" if otp else "⏳ Waiting for OTP..."
+    return (
+        f"🌐 *{country}*\n\n"
+        "┏━━━━━━━━━━━━━━━━┓\n"
+        f"      `{number}`\n"
+        "┗━━━━━━━━━━━━━━━━┛\n\n"
+        f"{status}"
+    )
 
-    await update.message.reply_text("**\n\n🐠 Click the Get Number button to receive your number!:", 
-                                    reply_markup=InlineKeyboardMarkup(get_main_menu()), parse_mode='Markdown')
+def detect_country(range_text):
+    for prefix, name in COUNTRY_MAP.items():
+        if range_text.startswith(prefix):
+            return name
+    return "GLOBAL"
 
-# ADMIN COMMAND
-async def add_balance_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global user_balance
-    if update.effective_user.username == ADMIN_USERNAME:
+async def is_subscribed(context, user_id):
+    for channel in CHANNELS:
         try:
-            amount = int(context.args[0])
-            user_balance += amount
-            await update.message.reply_text(f"✅ Successfully added {amount} INR!\nNew Balance: {user_balance} INR")
-        except:
-            await update.message.reply_text("❌ Usage: /addbalance [amount]")
-    else:
-        await update.message.reply_text("❌ Aap Admin nahi hain!")
+            member = await context.bot.get_chat_member(chat_id=channel, user_id=user_id)
+            if member.status in ['left', 'kicked']: return False
+        except: return False
+    return True
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global user_balance
+# --- HANDLERS ---
+async def start(update, context):
+    user_id = update.effective_user.id
+    if user_id in verified_users:
+        await update.message.reply_text("📱 *WELCOME TO PREMIUM BOT*", reply_markup=get_main_keyboard(), parse_mode='Markdown')
+    else:
+        kb = [
+            [InlineKeyboardButton("📢 Join Channel 1", url="https://t.me/methadchannnel")],
+            [InlineKeyboardButton("📢 Join Channel 2", url="https://t.me/otpgroupbabai")],
+            [InlineKeyboardButton("✅ VERIFY", callback_data='verify_sub')]
+        ]
+        await update.message.reply_text("👋 Welcome! Pehle channels join karein:", reply_markup=InlineKeyboardMarkup(kb))
+
+def get_main_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📱 Get Number", callback_data='get_number'), InlineKeyboardButton("📞 Support", callback_data='support')]
+    ])
+
+async def button_handler(update, context):
     query = update.callback_query
     await query.answer()
-
-    if query.data == 'support':
-        keyboard = [[InlineKeyboardButton("📩 Admin Message", url=f"t.me/{ADMIN_USERNAME}")],
-                    [InlineKeyboardButton("⬅ Back", callback_data='back_to_main')]]
-        await query.edit_message_text("👇 Contact Support:", reply_markup=InlineKeyboardMarkup(keyboard))
-
-    elif query.data == 'deposit':
-        keyboard = [
-            [InlineKeyboardButton("10 INR", callback_data="pay_10"), InlineKeyboardButton("20 INR", callback_data="pay_20")],
-            [InlineKeyboardButton("30 INR", callback_data="pay_30"), InlineKeyboardButton("40 INR", callback_data="pay_40")],
-            [InlineKeyboardButton("50 INR", callback_data="pay_50"), InlineKeyboardButton("60 INR", callback_data="pay_60")],
-            [InlineKeyboardButton("70 INR", callback_data="pay_70"), InlineKeyboardButton("80 INR", callback_data="pay_80")],
-            [InlineKeyboardButton("90 INR", callback_data="pay_90"), InlineKeyboardButton("100 INR", callback_data="pay_100")],
-            [InlineKeyboardButton("⬅ Back to Menu", callback_data='back_to_main')]
-        ]
-        await query.edit_message_text("💰 Select Amount to Deposit:", reply_markup=InlineKeyboardMarkup(keyboard))
-
-    elif query.data.startswith('pay_'):
-        amount = query.data.split('_')[1]
-        text = f"Send {amount} INR to this UPI:\n\n`{UPI_ID}`\n\n✅ Payment karne ke baad 'Verify' par click karein."
-        keyboard = [[InlineKeyboardButton("✅ Verify Payment", callback_data='verify')],
-                    [InlineKeyboardButton("⬅ Back to Deposit", callback_data='deposit')]]
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-
-    elif query.data == 'verify':
-        await query.edit_message_text("⏳ *Pending Payment*\n\nAdmin will approve your payment soon.", parse_mode='Markdown',
-                                      reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅ Back", callback_data='back_to_main')]]))
-
-    elif query.data == 'get_number':
-        if user_balance >= 20:
-            user_balance -= 20
-            keyboard = [[InlineKeyboardButton("🔵 Facebook", callback_data='fb_num'),
-                         InlineKeyboardButton("📸 Instagram", callback_data='insta_num')],
-                        [InlineKeyboardButton("⬅ Back to Menu", callback_data='back_to_main')]]
-            await query.edit_message_text("✅ Payment Success! Choose Platform:", reply_markup=InlineKeyboardMarkup(keyboard))
+    
+    if query.data == 'verify_sub':
+        if await is_subscribed(context, query.from_user.id):
+            verified_users.add(query.from_user.id)
+            await query.edit_message_text("✅ *Verified!* Choose action:", reply_markup=get_main_keyboard(), parse_mode='Markdown')
         else:
-            await query.edit_message_text("❌ Insufficient Balance! Pehle Deposit karein.")
-
-    elif query.data in ['fb_num', 'insta_num']:
-        keyboard = [
-            [InlineKeyboardButton("🔄 Replace Number", callback_data='replace'),
-             InlineKeyboardButton("🌍 Change Country", callback_data='change_country')],
-            [InlineKeyboardButton("📱 Otp Group Here", url='https://t.me/your_link'),
-             InlineKeyboardButton("⬅ Back to Menu", callback_data='back_to_main')]
-        ]
-        message = (f"✅ *Number Assigned!*\n\n📱 Face-Insta | `959680015292` | Myanmar 🇲🇲\n\n⏳ *Wait, Stay here... OTP Coming Soon!*")
-        await query.edit_message_text(message, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-
+            await query.answer("❌ Please join both channels first!", show_alert=True)
+            
+    elif query.data == 'get_number':
+        user_status[query.message.chat_id] = "waiting_for_range"
+        await query.edit_message_text("✍️ *Enter Number Range:*", parse_mode='Markdown')
+    
+    elif query.data == 'support':
+        await query.edit_message_text("👤 *Admin Support:*", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Contact Admin", url=f"https://t.me/{ADMIN_USERNAME}")], [InlineKeyboardButton("⬅ Back", callback_data='back_to_main')]]), parse_mode='Markdown')
+    
     elif query.data == 'back_to_main':
-        await query.edit_message_text("✅ *PROXY READY TO USE*\n\n👇 Select your option:", 
-                                      reply_markup=InlineKeyboardMarkup(get_main_menu()), parse_mode='Markdown')
+        await query.edit_message_text("📱 *Main Menu:*", reply_markup=get_main_keyboard(), parse_mode='Markdown')
+
+async def poll_otp(context, chat_id, message_id, number_id, number, country):
+    for _ in range(60):
+        try:
+            resp = requests.get(f"{BASE_URL}/numbers/{number_id}/sms", headers=HEADERS).json()
+            if resp.get("success") and resp.get("sms"):
+                otp = resp["sms"][0]["otp"]
+                await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=get_simple_ui(number, otp, country), parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅ Back to Menu", callback_data='back_to_main')]]))
+                await context.bot.send_message(chat_id=TARGET_GROUP_ID, text=f"📩 *{country} OTP:* `{otp}`", parse_mode='Markdown')
+                return
+        except: pass
+        await asyncio.sleep(5)
+
+async def text_handler(update, context):
+    chat_id = update.message.chat_id
+    if user_status.get(chat_id) == "waiting_for_range":
+        target_range = update.message.text.replace("XXX", "").strip()
+        country_name = detect_country(target_range)
+        user_status[chat_id] = None
+        msg = await update.message.reply_text("🔍 *Searching...*", parse_mode='Markdown')
+        
+        found = False
+        for _ in range(15):
+            try:
+                resp = requests.post(f"{BASE_URL}/numbers/get", json={"service": "google", "country": "BD", "engine": 1}, headers=HEADERS).json()
+                if resp.get("success") and resp.get("number", "").startswith(target_range):
+                    await msg.edit_text(get_simple_ui(resp['number'], country=country_name), parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅ Back to Menu", callback_data='back_to_main')]]))
+                    asyncio.create_task(poll_otp(context, chat_id, msg.message_id, resp['number_id'], resp['number'], country_name))
+                    found = True
+                    break
+            except: pass
+            await asyncio.sleep(2)
+        if not found: await msg.edit_text("❌ No match found.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅ Back to Menu", callback_data='back_to_main')]]))
 
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("addbalance", add_balance_cmd))
     app.add_handler(CallbackQueryHandler(button_handler))
-    print("Bot bilkul sahi chal raha hai!")
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+    print("Bot is ready and fully integrated!")
     app.run_polling()
-      
+                                          
