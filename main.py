@@ -12,19 +12,12 @@ CHANNELS = ["@methadchannnel", "@otpgroupbabai"]
 ADMIN_USERNAME = "babaiigc900179"
 TARGET_GROUP_ID = "-1002242139049" 
 
-user_status = {}
 verified_users = set()
 
-# --- UI & LOGIC HELPERS ---
-def get_simple_ui(number, otp=None, country="GLOBAL"):
+# --- UI HELPER ---
+def get_simple_ui(number, otp=None):
     status = f"🔢 OTP: `{otp}`" if otp else "⏳ Waiting for OTP..."
-    return (
-        f"🌐 *{country}*\n\n"
-        "┏━━━━━━━━━━━━━━━━┓\n"
-        f"      `{number}`\n"
-        "┗━━━━━━━━━━━━━━━━┛\n\n"
-        f"{status}"
-    )
+    return (f"🇬🇳 *GUINEA NUMBER*\n\n┏━━━━━━━━━━━━━━━━┓\n      `{number}`\n┗━━━━━━━━━━━━━━━━┛\n\n{status}")
 
 async def is_subscribed(context, user_id):
     for channel in CHANNELS:
@@ -34,88 +27,57 @@ async def is_subscribed(context, user_id):
         except: return False
     return True
 
-# --- HANDLERS ---
+# --- BOT LOGIC ---
 async def start(update, context):
-    user_id = update.effective_user.id
-    if user_id in verified_users:
-        await update.message.reply_text("📱 *WELCOME TO PREMIUM BOT*", reply_markup=get_main_keyboard(), parse_mode='Markdown')
-    else:
-        kb = [
-            [InlineKeyboardButton("📢 Join Channel 1", url="https://t.me/methadchannnel")],
-            [InlineKeyboardButton("📢 Join Channel 2", url="https://t.me/otpgroupbabai")],
-            [InlineKeyboardButton("✅ VERIFY", callback_data='verify_sub')]
-        ]
-        await update.message.reply_text("👋 Welcome! Pehle channels join karein:", reply_markup=InlineKeyboardMarkup(kb))
+    kb = [[InlineKeyboardButton("✅ VERIFY & GET NUMBER", callback_data='verify_sub')]]
+    await update.message.reply_text("👋 Welcome! Click below to get Guinea Number:", reply_markup=InlineKeyboardMarkup(kb))
 
-def get_main_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📱 Get Number", callback_data='get_number'), InlineKeyboardButton("📞 Support", callback_data='support')]
-    ])
-
-async def button_handler(update, context):
+async def fetch_guinea_number(update, context):
     query = update.callback_query
-    await query.answer()
+    await query.edit_message_text("🔍 *Fetching Guinea Number...*")
     
-    if query.data == 'verify_sub':
-        if await is_subscribed(context, query.from_user.id):
-            verified_users.add(query.from_user.id)
-            await query.edit_message_text("✅ *Verified!* Choose action:", reply_markup=get_main_keyboard(), parse_mode='Markdown')
+    try:
+        # FIXED: Sirf Guinea (GN) ke liye request
+        payload = {"service": "google", "country": "GN", "engine": 1}
+        resp = requests.post(f"{BASE_URL}/numbers/get", json=payload, headers=HEADERS).json()
+        
+        if resp.get("success"):
+            num = resp['number']
+            num_id = resp['number_id']
+            await query.edit_message_text(get_simple_ui(num), parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅ Menu", callback_data='start_menu')]]))
+            asyncio.create_task(poll_otp(context, query.message.chat_id, query.message.message_id, num_id, num))
         else:
-            await query.answer("❌ Please join both channels first!", show_alert=True)
-            
-    elif query.data == 'get_number':
-        user_status[query.message.chat_id] = "waiting_for_range"
-        await query.edit_message_text("✍️ *Enter Number Range:*", parse_mode='Markdown')
-    
-    elif query.data == 'support':
-        await query.edit_message_text("👤 *Admin Support:*", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Contact Admin", url=f"https://t.me/{ADMIN_USERNAME}")], [InlineKeyboardButton("⬅ Back", callback_data='back_to_main')]]), parse_mode='Markdown')
-    
-    elif query.data == 'back_to_main':
-        await query.edit_message_text("📱 *Main Menu:*", reply_markup=get_main_keyboard(), parse_mode='Markdown')
+            await query.edit_message_text("❌ *No Guinea numbers available right now.*", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅ Try Again", callback_data='verify_sub')]]))
+    except Exception as e:
+        await query.edit_message_text(f"Error: {e}")
 
-async def poll_otp(context, chat_id, message_id, number_id, number, country):
+async def poll_otp(context, chat_id, message_id, number_id, number):
     for _ in range(60):
         try:
             resp = requests.get(f"{BASE_URL}/numbers/{number_id}/sms", headers=HEADERS).json()
             if resp.get("success") and resp.get("sms"):
                 otp = resp["sms"][0]["otp"]
-                await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=get_simple_ui(number, otp, country), parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅ Back to Menu", callback_data='back_to_main')]]))
-                await context.bot.send_message(chat_id=TARGET_GROUP_ID, text=f"📩 *{country} OTP:* `{otp}`", parse_mode='Markdown')
+                await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=get_simple_ui(number, otp), parse_mode='Markdown')
+                await context.bot.send_message(chat_id=TARGET_GROUP_ID, text=f"📩 *Guinea OTP:* `{otp}`", parse_mode='Markdown')
                 return
         except: pass
         await asyncio.sleep(5)
 
-# --- GLOBAL SEARCH UPDATED HANDLER ---
-async def text_handler(update, context):
-    chat_id = update.message.chat_id
-    if user_status.get(chat_id) == "waiting_for_range":
-        target_range = update.message.text.strip()
-        user_status[chat_id] = None
-        msg = await update.message.reply_text("🔍 *Searching Global Database...*", parse_mode='Markdown')
-        
-        found = False
-        for _ in range(20): 
-            try:
-                # API ko 'country' batane ki zaroorat nahi, global search karega
-                resp = requests.post(f"{BASE_URL}/numbers/get", json={"service": "google", "engine": 1}, headers=HEADERS).json()
-                
-                if resp.get("success") and resp.get("number", "").startswith(target_range):
-                    num = resp['number']
-                    await msg.edit_text(get_simple_ui(num, country="GLOBAL"), parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅ Back", callback_data='back_to_main')]]))
-                    asyncio.create_task(poll_otp(context, chat_id, msg.message_id, resp['number_id'], num, "GLOBAL"))
-                    found = True
-                    break
-            except: pass
-            await asyncio.sleep(2)
-        
-        if not found: 
-            await msg.edit_text("❌ No match found. Try another range.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅ Back", callback_data='back_to_main')]]))
+async def button_handler(update, context):
+    query = update.callback_query
+    await query.answer()
+    if query.data == 'verify_sub':
+        if await is_subscribed(context, query.from_user.id):
+            await fetch_guinea_number(update, context)
+        else:
+            await query.answer("❌ Join channels first!", show_alert=True)
+    elif query.data == 'start_menu':
+        await start(update, context) # Simplified menu
 
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-    print("Bot is ready!")
+    print("Bot is ready for Guinea!")
     app.run_polling()
-            
+        
